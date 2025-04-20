@@ -95,7 +95,7 @@ rollup-boost = { git = "http://github.com/flashbots/rollup-boost", rev = "608853
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
-default = ["jemalloc","aa4337"]
+default = ["jemalloc", "aa4337", "flashblocks"]
 
 jemalloc = [
 	"dep:tikv-jemallocator",
