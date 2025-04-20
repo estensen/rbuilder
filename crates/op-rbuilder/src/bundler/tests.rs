@@ -2,11 +2,8 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::bundler::{BundleMeta, Bundler, MockBundler};
+    use crate::bundler::{Bundler, MockBundler};
     use crate::payload_builder_bundler::BundlerIntegration;
-    use alloy_consensus::Transaction;
-    use op_alloy_consensus::OpTypedTransaction;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn test_mock_bundler_basic() {

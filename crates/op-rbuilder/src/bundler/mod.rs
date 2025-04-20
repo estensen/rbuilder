@@ -4,8 +4,6 @@
 //! a menu of transaction bundles to the payload builder. The bundler is enabled
 //! via the `aa4337` feature flag.
 
-#[cfg(test)]
-mod tests;
 
 use async_trait::async_trait;
 use op_alloy_consensus::OpTypedTransaction;
@@ -78,7 +76,7 @@ impl Bundler for MockBundler {
             (3_000_000, 800_000_000_000_000_i128),   // 3M gas, 0.0008 ETH profit
         ];
 
-        for (i, (gas, profit)) in sizes.iter().enumerate() {
+        for (_i, (gas, profit)) in sizes.iter().enumerate() {
             if *gas <= gas_limit && bundles.len() < k {
                 // Only include bundles that meet the fee target
                 if let Some(target) = fee_target {

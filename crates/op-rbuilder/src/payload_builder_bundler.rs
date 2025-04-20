@@ -1,8 +1,7 @@
 use crate::bundler::{BundleMeta, Bundler, MockBundler};
-use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// BundlerIntegration provides integration with ERC-4337 bundler
 pub struct BundlerIntegration {
