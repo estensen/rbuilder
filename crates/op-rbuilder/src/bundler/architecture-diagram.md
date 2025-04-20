@@ -59,8 +59,8 @@ Defines the interface for bundler implementations. This allows for mock bundlers
 ### 3. Bundle Menu
 A collection of bundle options with different characteristics (gas usage, profit) that the payload builder can choose from.
 
-### 4. ProfitOracle
-Evaluates transaction profitability to help rank bundles. Different oracles can consider different factors (gas fees, token transfers, etc.)
+### 4. Profit Calculation
+Bundles include a profit hint that helps rank their expected profit contribution to the block.
 
 ### 5. Block Assembly Pipeline
 Where regular transactions and bundled UserOperations are combined into a final block.

@@ -1,4 +1,4 @@
-use crate::bundler::{BundleMeta, Bundler, MockBundler, OracleId};
+use crate::bundler::{BundleMeta, Bundler, MockBundler};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -37,7 +37,7 @@ impl BundlerIntegration {
     pub async fn request_bundle_menu(&self, gas_limit: u64, fee_target: Option<i128>) -> Vec<BundleMeta> {
         // Request k=3 bundle options from the bundler
         let menu = self.bundler
-            .propose_bundles(gas_limit, 3, fee_target, OracleId::EthGas)
+            .propose_bundles(gas_limit, 3, fee_target)
             .await;
         
         if menu.is_empty() {
@@ -75,7 +75,6 @@ impl BundlerIntegration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Transaction;
     
     #[tokio::test]
     async fn test_bundler_integration() {

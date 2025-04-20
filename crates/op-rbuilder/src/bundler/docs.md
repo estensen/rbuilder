@@ -41,10 +41,8 @@ The block builder selects the optimal bundle(s) from the menu based on:
 - Expected profit (using the ProfitOracle to price transactions)
 - Block space optimization
 
-### 4. Profit Oracle
-The profit oracle evaluates transactions to calculate their expected profit:
-- EthGasOracle: Considers only ETH gas fees
-- FullMEVOracle: Considers ETH fees + token transfers (for Paymaster-sponsored operations)
+### 4. Profit Calculation
+Each bundle includes a profit hint that indicates its expected contribution to block profit.
 
 ## Workflow
 

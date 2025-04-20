@@ -2,9 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::bundler::{BundleMeta, Bundler, MockBundler, OracleId, ProfitOracle, EthGasOracle};
+    use crate::bundler::{BundleMeta, Bundler, MockBundler};
     use crate::payload_builder_bundler::BundlerIntegration;
     use alloy_consensus::Transaction;
+    use op_alloy_consensus::OpTypedTransaction;
     use std::time::Duration;
 
     #[tokio::test]
@@ -13,7 +14,7 @@ mod tests {
         
         // Test with sufficient gas
         let bundles = bundler
-            .propose_bundles(5_000_000, 3, None, OracleId::EthGas)
+            .propose_bundles(5_000_000, 3, None)
             .await;
         
         assert_eq!(bundles.len(), 3);
@@ -23,7 +24,7 @@ mod tests {
         
         // Test with limited gas
         let bundles = bundler
-            .propose_bundles(800_000, 3, None, OracleId::EthGas)
+            .propose_bundles(800_000, 3, None)
             .await;
         
         assert_eq!(bundles.len(), 1);
@@ -31,7 +32,7 @@ mod tests {
         
         // Test with insufficient gas
         let bundles = bundler
-            .propose_bundles(100_000, 3, None, OracleId::EthGas)
+            .propose_bundles(100_000, 3, None)
             .await;
         
         assert_eq!(bundles.len(), 0);
@@ -43,26 +44,18 @@ mod tests {
         
         // Test with fee target that allows all bundles
         let bundles = bundler
-            .propose_bundles(5_000_000, 3, Some(100_000_000_000_000), OracleId::EthGas)
+            .propose_bundles(5_000_000, 3, Some(100_000_000_000_000))
             .await;
         
         assert_eq!(bundles.len(), 3);
         
         // Test with fee target that filters some bundles
         let bundles = bundler
-            .propose_bundles(5_000_000, 3, Some(500_000_000_000_000), OracleId::EthGas)
+            .propose_bundles(5_000_000, 3, Some(500_000_000_000_000))
             .await;
         
         assert_eq!(bundles.len(), 1);
         assert!(bundles[0].profit_hint >= 500_000_000_000_000);
-    }
-    
-    #[tokio::test]
-    async fn test_eth_gas_oracle() {
-        let oracle = EthGasOracle;
-        let profit = oracle.price_tx("dummy_trace").await;
-        
-        assert!(profit > 0);
     }
     
     #[tokio::test]

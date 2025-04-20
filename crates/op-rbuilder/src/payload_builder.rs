@@ -753,6 +753,10 @@ where
         // Request bundle menu with remaining gas limit
         let remaining_gas = ctx.block_gas_limit().saturating_sub(info.cumulative_gas_used);
         if remaining_gas > 500_000 {
+            // First, request a fresh bundle menu
+            self.bundler.request_bundle_menu(remaining_gas, None).await;
+            
+            // Then try to find the best bundle
             if let Some(best_bundle) = self.bundler.find_best_bundle(remaining_gas).await {
                 info!(
                     target: "payload_builder",
