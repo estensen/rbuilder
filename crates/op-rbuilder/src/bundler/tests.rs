@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::bundler::{Bundler, MockBundler};
-    use crate::payload_builder_bundler::BundlerIntegration;
+    use op_rbuilder::payload_builder_bundler::BundlerIntegration;
 
     #[tokio::test]
     async fn test_mock_bundler_basic() {

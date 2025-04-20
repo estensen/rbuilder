@@ -5,7 +5,8 @@ use crate::{
     tx_signer::Signer,
 };
 #[cfg(feature = "aa4337")]
-use crate::payload_builder_bundler::BundlerIntegration;
+use op_rbuilder::payload_builder_bundler::BundlerIntegration;
+use tracing::info;
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, Eip658Value, Header, Transaction, Typed2718,
     EMPTY_OMMER_ROOT_HASH,
@@ -236,6 +237,9 @@ pub struct OpPayloadBuilder<Pool, Client> {
     pub flashblock_block_time: u64,
     /// The metrics for the builder
     pub metrics: OpRBuilderMetrics,
+    /// ERC-4337 bundler integration
+    #[cfg(feature = "aa4337")]
+    pub bundler: BundlerIntegration,
 }
 
 impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
@@ -256,7 +260,7 @@ impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
         tokio::spawn(async move {
             Self::start_ws(subscribers, &flashblocks_ws_url).await;
         });
-        
+
         #[cfg(feature = "aa4337")]
         info!("ERC-4337 bundler integration enabled");
 
@@ -750,23 +754,17 @@ where
 
     #[cfg(feature = "aa4337")]
     {
-        // Request bundle menu with remaining gas limit
-        let remaining_gas = ctx.block_gas_limit().saturating_sub(info.cumulative_gas_used);
+        // Calculate remaining gas
+        let remaining_gas = ctx
+            .block_gas_limit()
+            .saturating_sub(info.cumulative_gas_used);
+        
         if remaining_gas > 500_000 {
-            // First, request a fresh bundle menu
-            self.bundler.request_bundle_menu(remaining_gas, None).await;
-            
-            // Then try to find the best bundle
-            if let Some(best_bundle) = self.bundler.find_best_bundle(remaining_gas).await {
-                info!(
-                    target: "payload_builder",
-                    "Including ERC-4337 bundle with gas={}, profit={}",
-                    best_bundle.gas_used,
-                    best_bundle.profit_hint
-                );
-                // In a full implementation, we would simulate and execute the bundle transaction here
-                // For this PoC, we're just logging that we found a bundle
-            }
+            // Log only to demonstrate the integration point
+            debug!(target: "payload_builder", 
+                "Would include ERC-4337 bundle with remaining gas={}", 
+                remaining_gas
+            );
         }
     }
 

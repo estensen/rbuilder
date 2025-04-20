@@ -11,6 +11,26 @@ pub struct BundlerIntegration {
     current_menu: RwLock<Vec<BundleMeta>>,
 }
 
+impl std::fmt::Debug for BundlerIntegration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BundlerIntegration")
+            .field("bundler", &"dyn Bundler")
+            .field("current_menu", &"RwLock<Vec<BundleMeta>>")
+            .finish()
+    }
+}
+
+impl Clone for BundlerIntegration {
+    fn clone(&self) -> Self {
+        // We need to create a new instance with the same bundler
+        // since we can't really clone the Arc<dyn Bundler>
+        Self {
+            bundler: self.bundler.clone(),
+            current_menu: RwLock::new(Vec::new()),
+        }
+    }
+}
+
 impl Default for BundlerIntegration {
     fn default() -> Self {
         Self::new()
