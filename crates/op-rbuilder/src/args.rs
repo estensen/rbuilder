@@ -41,4 +41,8 @@ pub struct OpRbuilderArgs {
     /// Signals whether to log pool transaction events
     #[arg(long = "builder.log-pool-transactions", default_value = "false")]
     pub log_pool_transactions: bool,
+    /// Enable ERC-4337 bundler integration
+    #[cfg(feature = "aa4337")]
+    #[arg(long = "builder.enable-4337", default_value = "false")]
+    pub enable_4337: bool,
 }

@@ -4,6 +4,8 @@ use crate::{
     primitives::reth::ExecutionInfo,
     tx_signer::Signer,
 };
+#[cfg(feature = "aa4337")]
+use crate::payload_builder_bundler::BundlerIntegration;
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, Eip658Value, Header, Transaction, Typed2718,
     EMPTY_OMMER_ROOT_HASH,
@@ -254,6 +256,9 @@ impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
         tokio::spawn(async move {
             Self::start_ws(subscribers, &flashblocks_ws_url).await;
         });
+        
+        #[cfg(feature = "aa4337")]
+        info!("ERC-4337 bundler integration enabled");
 
         Self {
             evm_config,
@@ -263,6 +268,8 @@ impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
             chain_block_time,
             flashblock_block_time,
             metrics: Default::default(),
+            #[cfg(feature = "aa4337")]
+            bundler: BundlerIntegration::new(),
         }
     }
 
@@ -740,6 +747,24 @@ where
 
     // pick the new transactions from the info field and update the last flashblock index
     let new_transactions = info.executed_transactions[info.last_flashblock_index..].to_vec();
+
+    #[cfg(feature = "aa4337")]
+    {
+        // Request bundle menu with remaining gas limit
+        let remaining_gas = ctx.block_gas_limit().saturating_sub(info.cumulative_gas_used);
+        if remaining_gas > 500_000 {
+            if let Some(best_bundle) = self.bundler.find_best_bundle(remaining_gas).await {
+                info!(
+                    target: "payload_builder",
+                    "Including ERC-4337 bundle with gas={}, profit={}",
+                    best_bundle.gas_used,
+                    best_bundle.profit_hint
+                );
+                // In a full implementation, we would simulate and execute the bundle transaction here
+                // For this PoC, we're just logging that we found a bundle
+            }
+        }
+    }
 
     let new_transactions_encoded = new_transactions
         .clone()

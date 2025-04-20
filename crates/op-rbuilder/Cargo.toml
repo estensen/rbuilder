@@ -117,6 +117,7 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 integration = []
 flashblocks = []
+aa4337 = []
 
 [[bin]]
 name = "op-rbuilder"
