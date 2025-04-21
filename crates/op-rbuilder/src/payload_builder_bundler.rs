@@ -3,6 +3,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
+// Use a constant for menu size
+const DEFAULT_MENU_SIZE: usize = 3;
+
 /// BundlerIntegration provides integration with ERC-4337 bundler
 pub struct BundlerIntegration {
     /// The bundler instance
@@ -22,8 +25,6 @@ impl std::fmt::Debug for BundlerIntegration {
 
 impl Clone for BundlerIntegration {
     fn clone(&self) -> Self {
-        // We need to create a new instance with the same bundler
-        // since we can't really clone the Arc<dyn Bundler>
         Self {
             bundler: self.bundler.clone(),
             current_menu: RwLock::new(Vec::new()),
@@ -33,16 +34,19 @@ impl Clone for BundlerIntegration {
 
 impl Default for BundlerIntegration {
     fn default() -> Self {
-        Self::new()
+        debug!("Initializing ERC-4337 bundler integration with mock bundler");
+        Self {
+            bundler: Arc::new(MockBundler::new()),
+            current_menu: RwLock::new(Vec::new()),
+        }
     }
 }
 
 impl BundlerIntegration {
-    /// Create a new bundler integration
-    pub fn new() -> Self {
-        info!("Initializing ERC-4337 bundler integration");
+    pub fn with_bundler(bundler: Arc<dyn Bundler>) -> Self {
+        debug!("Initializing ERC-4337 bundler integration with provided bundler");
         Self {
-            bundler: Arc::new(MockBundler::new()),
+            bundler,
             current_menu: RwLock::new(Vec::new()),
         }
     }
@@ -53,18 +57,23 @@ impl BundlerIntegration {
     }
 
     /// Request a new bundle menu from the bundler
-    pub async fn request_bundle_menu(&self, gas_limit: u64, fee_target: Option<i128>) -> Vec<BundleMeta> {
-        // Request k=3 bundle options from the bundler
-        let menu = self.bundler
-            .propose_bundles(gas_limit, 3, fee_target)
+    pub async fn request_bundle_menu(
+        &self,
+        gas_limit: u64,
+        fee_target: Option<i128>,
+    ) -> Vec<BundleMeta> {
+        // Request bundle options from the bundler using the constant
+        let menu = self
+            .bundler
+            .propose_bundles(gas_limit, DEFAULT_MENU_SIZE, fee_target)
             .await;
-        
+
         if menu.is_empty() {
             debug!("Bundler returned empty menu");
         } else {
             let mut lock = self.current_menu.write().await;
             *lock = menu.clone();
-            
+
             info!(
                 "Received bundle menu with {} options, gas_usages: {:?}, profits: {:?}",
                 menu.len(),
@@ -72,7 +81,7 @@ impl BundlerIntegration {
                 menu.iter().map(|b| b.profit_hint).collect::<Vec<_>>()
             );
         }
-        
+
         menu
     }
 
@@ -94,26 +103,31 @@ impl BundlerIntegration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_bundler_integration() {
-        let integration = BundlerIntegration::new();
-        
+        // Use default() instead of new()
+        let integration = BundlerIntegration::default();
+
         // Test with sufficient gas
-        let menu = integration.request_bundle_menu(5_000_000, None).await;
+        let menu = integration
+            .request_bundle_menu(5_000_000, None::<i128>)
+            .await;
         assert_eq!(menu.len(), 3);
-        
+
         // Get the best bundle
         let best = integration.find_best_bundle(5_000_000).await;
         assert!(best.is_some());
         let best = best.unwrap();
         assert_eq!(best.gas_used, 3_000_000);
         assert_eq!(best.profit_hint, 800_000_000_000_000);
-        
+
         // Test with limited gas
-        let menu = integration.request_bundle_menu(2_000_000, None).await;
+        let menu = integration
+            .request_bundle_menu(2_000_000, None::<i128>)
+            .await;
         assert_eq!(menu.len(), 2);
-        
+
         // Get the best bundle with limited gas
         let best = integration.find_best_bundle(2_000_000).await;
         assert!(best.is_some());

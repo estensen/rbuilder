@@ -4,9 +4,6 @@ use crate::{
     primitives::reth::ExecutionInfo,
     tx_signer::Signer,
 };
-#[cfg(feature = "aa4337")]
-use op_rbuilder::payload_builder_bundler::BundlerIntegration;
-use tracing::info;
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, Eip658Value, Header, Transaction, Typed2718,
     EMPTY_OMMER_ROOT_HASH,
@@ -18,6 +15,8 @@ use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawals;
 use futures_util::{FutureExt, SinkExt};
 use op_alloy_consensus::OpDepositReceipt;
+#[cfg(feature = "aa4337")]
+use op_rbuilder::payload_builder_bundler::BundlerIntegration;
 use op_revm::OpSpecId;
 use reth::{
     builder::{
@@ -77,7 +76,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Flashblocks specific payload building errors.
 #[derive(Debug, thiserror::Error)]
@@ -273,7 +272,7 @@ impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
             flashblock_block_time,
             metrics: Default::default(),
             #[cfg(feature = "aa4337")]
-            bundler: BundlerIntegration::new(),
+            bundler: BundlerIntegration::default(),
         }
     }
 
@@ -758,11 +757,11 @@ where
         let remaining_gas = ctx
             .block_gas_limit()
             .saturating_sub(info.cumulative_gas_used);
-        
+
         if remaining_gas > 500_000 {
             // Log only to demonstrate the integration point
-            debug!(target: "payload_builder", 
-                "Would include ERC-4337 bundle with remaining gas={}", 
+            debug!(target: "payload_builder",
+                "Would include ERC-4337 bundle with remaining gas={}",
                 remaining_gas
             );
         }
