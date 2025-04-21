@@ -444,6 +444,7 @@ where
         }
 
         // Get the Tokio runtime handle
+        // HACK: to call async functions from sync context
         let handle = match Handle::try_current() {
             Ok(h) => h,
             Err(e) => {
