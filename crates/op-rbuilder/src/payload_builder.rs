@@ -15,8 +15,6 @@ use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawals;
 use futures_util::{FutureExt, SinkExt};
 use op_alloy_consensus::OpDepositReceipt;
-#[cfg(feature = "aa4337")]
-use op_rbuilder::payload_builder_bundler::BundlerIntegration;
 use op_revm::OpSpecId;
 use reth::{
     builder::{
@@ -236,9 +234,6 @@ pub struct OpPayloadBuilder<Pool, Client> {
     pub flashblock_block_time: u64,
     /// The metrics for the builder
     pub metrics: OpRBuilderMetrics,
-    /// ERC-4337 bundler integration
-    #[cfg(feature = "aa4337")]
-    pub bundler: BundlerIntegration,
 }
 
 impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
@@ -260,9 +255,6 @@ impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
             Self::start_ws(subscribers, &flashblocks_ws_url).await;
         });
 
-        #[cfg(feature = "aa4337")]
-        info!("ERC-4337 bundler integration enabled");
-
         Self {
             evm_config,
             pool,
@@ -271,8 +263,6 @@ impl<Pool, Client> OpPayloadBuilder<Pool, Client> {
             chain_block_time,
             flashblock_block_time,
             metrics: Default::default(),
-            #[cfg(feature = "aa4337")]
-            bundler: BundlerIntegration::default(),
         }
     }
 
@@ -392,8 +382,6 @@ where
             block_env_attributes,
             cancel: args.cancel.clone(),
             metrics: self.metrics.clone(),
-            #[cfg(feature = "aa4337")]
-            bundler: self.bundler.clone(),
         };
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
@@ -530,75 +518,6 @@ where
                         .payload_tx_simulation_duration
                         .record(tx_execution_start_time.elapsed());
 
-                    // --- Begin ERC-4337 Bundler Integration for Flashblock ---
-                    #[cfg(feature = "aa4337")]
-                    {
-                        let remaining_gas = ctx
-                            .block_gas_limit()
-                            .saturating_sub(info.cumulative_gas_used);
-                        // Skip first flashblock (index 0) to prioritize regular txs
-                        if remaining_gas >= 500_000 && flashblock_count > 0 {
-                            debug!(target: "payload_builder", "Attempting to include ERC-4337 bundle in flashblock {}", flashblock_count);
-                            // Higher profit target for flashblocks, adjust as needed
-                            let fee_target = Some(200_000_000_000_000i128);
-
-                            // Use a timeout to ensure we don't block the build process excessively
-                            let (menu, best_bundle) = tokio::task::block_in_place(|| {
-                                let rt = tokio::runtime::Handle::current();
-                                rt.block_on(async {
-                                    let menu_future = self.bundler.request_bundle_menu(remaining_gas, fee_target);
-                                    let menu = match tokio::time::timeout(Duration::from_millis(50), menu_future).await {
-                                        Ok(menu) => menu,
-                                        Err(_) => {
-                                            debug!(target: "payload_builder", "Timeout requesting bundle menu for flashblock");
-                                            vec![]
-                                        }
-                                    };
-                                    let best = self.bundler.find_best_bundle(remaining_gas).await;
-                                    (menu, best)
-                                })
-                            });
-
-                            if let Some(best) = best_bundle {
-                                // Re-simulate before inclusion
-                                let tx_env = self.evm_config.tx_env(&best.tx);
-                                let mut evm =
-                                    self.evm_config.evm_with_env(&mut db, ctx.evm_env.clone());
-
-                                match evm.transact(&best.tx.clone().into()) {
-                                    Ok(result) => {
-                                        debug!(target: "payload_builder",
-                                            "Including ERC-4337 bundle in flashblock {}: gas={}, profit={}",
-                                            flashblock_count, best.gas_used, best.profit_hint
-                                        );
-
-                                        // Add bundle transaction to executed transactions
-                                        // Ensure it's not already included from the main block build
-                                        if !info.executed_transactions.contains(&best.tx) {
-                                            info.executed_transactions.push(best.tx.clone());
-                                            // Update cumulative gas and other metrics
-                                            info.cumulative_gas_used += result.result.gas_used();
-                                            // Commit the state changes
-                                            db.commit(result.state);
-                                        } else {
-                                            debug!(target: "payload_builder", "Bundle already included in main block, skipping for flashblock");
-                                        }
-                                    }
-                                    Err(err) => {
-                                        debug!(target: "payload_builder",
-                                            "Flashblock bundle simulation failed, not including: {}", err
-                                        );
-                                    }
-                                }
-                            } else {
-                                debug!(target: "payload_builder", "No suitable bundle found for flashblock {} with remaining gas {}", flashblock_count, remaining_gas);
-                            }
-                        } else {
-                            debug!(target: "payload_builder", "Skipping bundle check for flashblock {}: remaining_gas={}, count={}", flashblock_count, remaining_gas, flashblock_count);
-                        }
-                    }
-                    // --- End ERC-4337 Bundler Integration for Flashblock ---
-
                     if ctx.cancel.is_cancelled() {
                         tracing::info!(
                             target: "payload_builder",
@@ -726,89 +645,6 @@ where
     let logs_bloom = execution_outcome
         .block_logs_bloom(block_number)
         .expect("Number is in range");
-
-    // --- Begin ERC-4337 Bundler Integration for Main Block ---
-    #[cfg(feature = "aa4337")]
-    {
-        let remaining_gas = ctx
-            .block_gas_limit()
-            .saturating_sub(info.cumulative_gas_used);
-
-        // Request new bundle menu if we have enough gas for smallest bundle
-        if remaining_gas >= 500_000 {
-            debug!(target: "payload_builder", "Attempting to include ERC-4337 bundle in main block");
-            // Use a timeout to ensure we don't block the build process
-            // Pass None for fee_target for the main block build initially
-            let (menu, best_bundle) = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    let menu_future = ctx.bundler.request_bundle_menu(remaining_gas, None);
-                    let menu = match tokio::time::timeout(Duration::from_millis(100), menu_future).await {
-                        Ok(menu) => menu,
-                        Err(_) => {
-                            debug!(target: "payload_builder", "Timeout requesting bundle menu for main block");
-                            vec![]
-                        }
-                    };
-                    let best = ctx.bundler.find_best_bundle(remaining_gas).await;
-                    (menu, best)
-                })
-            });
-
-            if let Some(best) = best_bundle {
-                debug!(target: "payload_builder", "Found best bundle: gas={}, profit={}", best.gas_used, best.profit_hint);
-                // Re-simulate before inclusion
-                let tx_env = ctx.evm_config.tx_env(&best.tx);
-                // Create a new EVM instance with the current state
-                let mut evm = ctx.evm_config.evm_with_env(&mut state, ctx.evm_env.clone());
-
-                match evm.transact(&best.tx.clone().into()) {
-                    Ok(result) => {
-                        debug!(target: "payload_builder",
-                            "Including ERC-4337 bundle in main block: gas={}, profit={}",
-                            best.gas_used, best.profit_hint
-                        );
-
-                        // Add bundle transaction to executed transactions
-                        info.executed_transactions.push(best.tx.clone());
-
-                        // Update cumulative gas and other metrics
-                        info.cumulative_gas_used += result.result.gas_used();
-
-                        // Commit the state changes from the bundle execution
-                        state.commit(result.state);
-
-                        // Recalculate receipts_root and logs_bloom if needed *after* bundle inclusion
-                        // This might require re-running parts of the execution outcome calculation or adjusting it.
-                        // For now, we'll assume the inclusion happens before final root calculation.
-                        // TODO: Revisit if recalculation of roots/bloom is needed here.
-                    }
-                    Err(err) => {
-                        match err {
-                            // Use fully qualified path for EVMError::Transaction
-                            revm_primitives::EVMError::Transaction(invalid_tx_err) => {
-                                debug!(target: "payload_builder",
-                                    "Main block bundle simulation failed (InvalidTx): {}, not including.", invalid_tx_err
-                                );
-                            }
-                            other_err => {
-                                // Treat other EVM errors as potentially critical for the block build?
-                                // For now, just log and don't include the bundle.
-                                error!(target: "payload_builder",
-                                    "Main block bundle simulation failed (EvmError): {}, not including.", other_err
-                                );
-                            }
-                        }
-                    }
-                }
-            } else {
-                debug!(target: "payload_builder", "No suitable bundle found for main block with remaining gas {}", remaining_gas);
-            }
-        } else {
-            debug!(target: "payload_builder", "Skipping bundle check for main block: remaining_gas={}", remaining_gas);
-        }
-    }
-    // --- End ERC-4337 Bundler Integration for Main Block ---
 
     // Recalculate receipts root and logs bloom *after* potential bundle inclusion
     // Note: This uses the *final* info.receipts which might not include bundle receipts yet.
@@ -1053,9 +889,6 @@ pub struct OpPayloadBuilderCtx<ChainSpec> {
     pub cancel: CancellationToken,
     /// The metrics for the builder
     pub metrics: OpRBuilderMetrics,
-    /// ERC-4337 bundler integration
-    #[cfg(feature = "aa4337")]
-    pub bundler: BundlerIntegration,
 }
 
 impl<ChainSpec> OpPayloadBuilderCtx<ChainSpec>
