@@ -87,7 +87,7 @@ pub struct CustomOpPayloadBuilder {
     #[cfg(feature = "flashblocks")]
     flashblock_block_time: u64,
     #[cfg(feature = "aa4337")]
-    bundler_integration: Option<BundlerIntegration>,
+    bundler_integration: BundlerIntegration,
 }
 
 impl CustomOpPayloadBuilder {
@@ -118,7 +118,7 @@ impl CustomOpPayloadBuilder {
         Self {
             builder_signer,
             #[cfg(feature = "aa4337")]
-            bundler_integration: Some(BundlerIntegration::default()),
+            bundler_integration: BundlerIntegration::default(),
         }
     }
 }
@@ -444,23 +444,11 @@ where
             return;
         }
 
-        // Get the Tokio runtime handle
-        // HACK: to call async functions from sync context
-        let handle = match Handle::try_current() {
-            Ok(h) => h,
-            Err(e) => {
-                warn!(target: "payload_builder", id=%config.payload_id(), error = %e, "Failed to get Tokio handle, skipping bundler interaction.");
-                return;
-            }
-        };
-
-        let best_bundle = match handle.block_on(
-            self.bundler_integration
-                .get_best_bundle(block_gas_limit, None),
-        ) {
-            Some(bundle) => bundle,
-            None => return,
-        };
+        // HACK: should be async
+        let best_bundle = self
+            .bundler_integration
+            .get_best_bundle(block_gas_limit, None)
+            .unwrap();
 
         // Log bundle details
         let bundle_tx_hash = best_bundle.tx.hash();

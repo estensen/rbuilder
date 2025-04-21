@@ -1,6 +1,5 @@
 use crate::bundler::{BundleMeta, Bundler, MockBundler};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tracing::debug;
 
 /// BundlerIntegration provides integration with ERC-4337 bundler
@@ -69,12 +68,11 @@ impl BundlerIntegration {
     }
 
     /// Request a new bundle menu from the bundler and update internal state
-    async fn update_bundle_menu(&self, gas_limit: u64, fee_target: Option<i128>) {
+    fn update_bundle_menu(&self, gas_limit: u64, fee_target: Option<i128>) {
         // Request bundle options from the bundler
         let menu = self
             .bundler
-            .propose_bundles(gas_limit, self.menu_size, fee_target)
-            .await;
+            .propose_bundles(gas_limit, self.menu_size, fee_target);
 
         // Log the results
         if menu.is_empty() {
@@ -89,18 +87,18 @@ impl BundlerIntegration {
         }
 
         // Update the current menu
-        let mut lock = self.current_menu.write().await;
+        let mut lock = self.current_menu.write().unwrap();
         *lock = menu;
     }
 
     /// Get the current bundle menu
-    pub async fn get_bundle_menu(&self) -> Vec<BundleMeta> {
-        self.current_menu.read().await.clone()
+    pub fn get_bundle_menu(&self) -> Vec<BundleMeta> {
+        self.current_menu.read().unwrap().clone()
     }
 
     /// Find the best bundle option for the given gas limit from current menu
-    pub async fn find_best_bundle(&self, gas_limit: u64) -> Option<BundleMeta> {
-        let menu = self.current_menu.read().await;
+    pub fn find_best_bundle(&self, gas_limit: u64) -> Option<BundleMeta> {
+        let menu = self.current_menu.read().unwrap();
 
         if menu.is_empty() {
             debug!("Cannot find best bundle: menu is empty");
@@ -126,16 +124,12 @@ impl BundlerIntegration {
     }
 
     /// Convenience method: Update menu and find best bundle in one operation
-    pub async fn get_best_bundle(
-        &self,
-        gas_limit: u64,
-        fee_target: Option<i128>,
-    ) -> Option<BundleMeta> {
+    pub fn get_best_bundle(&self, gas_limit: u64, fee_target: Option<i128>) -> Option<BundleMeta> {
         // Update menu first
-        self.update_bundle_menu(gas_limit, fee_target).await;
+        self.update_bundle_menu(gas_limit, fee_target);
 
         // Then find best bundle
-        self.find_best_bundle(gas_limit).await
+        self.find_best_bundle(gas_limit)
     }
 }
 
@@ -143,68 +137,62 @@ impl BundlerIntegration {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_bundler_integration() {
+    #[test]
+    fn test_bundler_integration() {
         // Use default() instead of new()
         let integration = BundlerIntegration::default();
 
         // Test with sufficient gas
-        integration
-            .update_bundle_menu(5_000_000, None::<i128>)
-            .await;
-        let menu = integration.get_bundle_menu().await;
+        integration.update_bundle_menu(5_000_000, None::<i128>);
+        let menu = integration.get_bundle_menu();
         assert_eq!(menu.len(), 3);
 
         // Get the best bundle
-        let best = integration.find_best_bundle(5_000_000).await;
+        let best = integration.find_best_bundle(5_000_000);
         assert!(best.is_some());
         let best = best.unwrap();
         assert_eq!(best.gas_used, 3_000_000);
         assert_eq!(best.profit_hint, 800_000_000_000_000);
 
         // Test with limited gas (using the convenience method)
-        let best = integration.get_best_bundle(2_000_000, None::<i128>).await;
+        let best = integration.get_best_bundle(2_000_000, None::<i128>);
         assert!(best.is_some());
         let best = best.unwrap();
         assert_eq!(best.gas_used, 1_000_000);
         assert_eq!(best.profit_hint, 300_000_000_000_000);
     }
 
-    #[tokio::test]
-    async fn test_custom_menu_size() {
+    #[test]
+    fn test_custom_menu_size() {
         let bundler = Arc::new(MockBundler::new());
         let integration = BundlerIntegration::with_menu_size(bundler, 5);
 
-        integration
-            .update_bundle_menu(5_000_000, None::<i128>)
-            .await;
-        let menu = integration.get_bundle_menu().await;
+        integration.update_bundle_menu(5_000_000, None::<i128>);
+        let menu = integration.get_bundle_menu();
 
         // Should have requested 5 menu items
         assert!(menu.len() <= 5);
     }
 
-    #[tokio::test]
-    async fn test_clone_shares_menu() {
+    #[test]
+    fn test_clone_shares_menu() {
         let integration = BundlerIntegration::default();
         let clone = integration.clone();
 
         // Update the menu in the original
-        integration
-            .update_bundle_menu(5_000_000, None::<i128>)
-            .await;
+        integration.update_bundle_menu(5_000_000, None::<i128>);
 
         // The clone should see the same menu
-        let menu = clone.get_bundle_menu().await;
+        let menu = clone.get_bundle_menu();
         assert_eq!(menu.len(), 3);
     }
 
-    #[tokio::test]
-    async fn test_mock_bundler_basic() {
+    #[test]
+    fn test_mock_bundler_basic() {
         let bundler = MockBundler::new();
 
         // Test with sufficient gas
-        let bundles = bundler.propose_bundles(5_000_000, 3, None).await;
+        let bundles = bundler.propose_bundles(5_000_000, 3, None);
 
         assert_eq!(bundles.len(), 3);
         assert!(bundles[0].gas_used <= 5_000_000);
@@ -212,32 +200,28 @@ mod tests {
         assert!(bundles[2].gas_used <= 5_000_000);
 
         // Test with limited gas
-        let bundles = bundler.propose_bundles(800_000, 3, None).await;
+        let bundles = bundler.propose_bundles(800_000, 3, None);
 
         assert_eq!(bundles.len(), 1);
         assert!(bundles[0].gas_used <= 800_000);
 
         // Test with insufficient gas
-        let bundles = bundler.propose_bundles(100_000, 3, None).await;
+        let bundles = bundler.propose_bundles(100_000, 3, None);
 
         assert_eq!(bundles.len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_mock_bundler_fee_target() {
+    #[test]
+    fn test_mock_bundler_fee_target() {
         let bundler = MockBundler::new();
 
         // Test with fee target that allows all bundles
-        let bundles = bundler
-            .propose_bundles(5_000_000, 3, Some(100_000_000_000_000))
-            .await;
+        let bundles = bundler.propose_bundles(5_000_000, 3, Some(100_000_000_000_000));
 
         assert_eq!(bundles.len(), 3);
 
         // Test with fee target that filters some bundles
-        let bundles = bundler
-            .propose_bundles(5_000_000, 3, Some(500_000_000_000_000))
-            .await;
+        let bundles = bundler.propose_bundles(5_000_000, 3, Some(500_000_000_000_000));
 
         assert_eq!(bundles.len(), 1);
         assert!(bundles[0].profit_hint >= 500_000_000_000_000);
