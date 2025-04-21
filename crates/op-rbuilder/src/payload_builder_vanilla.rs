@@ -8,7 +8,8 @@ use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, transaction::Recovered, Eip658Value, Header, Transaction,
     TxEip1559, Typed2718, EMPTY_OMMER_ROOT_HASH,
 };
-use op_rbuilder::bundler::BundleMeta;
+use op_rbuilder::bundler::BundlerIntegration;
+use reth::builder::Node;
 
 use alloy_eips::{eip2718::WithEncoded, merge::BEACON_NONCE};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
@@ -16,7 +17,6 @@ use alloy_primitives::{private::alloy_rlp::Encodable, Address, Bytes, TxHash, Tx
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawals;
 use op_alloy_consensus::{OpDepositReceipt, OpTypedTransaction};
-use op_rbuilder::payload_builder_bundler::BundlerIntegration;
 use op_revm::OpSpecId;
 use reth::{
     builder::{
@@ -71,8 +71,6 @@ use revm::{
     DatabaseCommit,
 };
 use std::{sync::Arc, time::Instant};
-#[cfg(feature = "aa4337")]
-use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
@@ -86,8 +84,6 @@ pub struct CustomOpPayloadBuilder {
     chain_block_time: u64,
     #[cfg(feature = "flashblocks")]
     flashblock_block_time: u64,
-    #[cfg(feature = "aa4337")]
-    bundler_integration: BundlerIntegration,
 }
 
 impl CustomOpPayloadBuilder {
@@ -115,11 +111,7 @@ impl CustomOpPayloadBuilder {
         _chain_block_time: u64,
         _flashblock_block_time: u64,
     ) -> Self {
-        Self {
-            builder_signer,
-            #[cfg(feature = "aa4337")]
-            bundler_integration: BundlerIntegration::default(),
-        }
+        Self { builder_signer }
     }
 }
 
@@ -452,7 +444,7 @@ where
 
         // Log bundle details
         let bundle_tx_hash = best_bundle.tx.hash();
-        debug!(
+        info!(
             target: "payload_builder",
             id=%config.payload_id(),
             bundle_tx_hash=format!("{bundle_tx_hash:#x}"),

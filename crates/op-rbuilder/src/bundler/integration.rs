@@ -1,4 +1,4 @@
-use crate::bundler::{BundleMeta, Bundler, MockBundler};
+use super::{mock::MockBundler, types::BundleMeta, Bundler};
 use std::sync::{Arc, RwLock};
 use tracing::debug;
 
