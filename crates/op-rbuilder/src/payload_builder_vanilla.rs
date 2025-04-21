@@ -8,9 +8,8 @@ use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, transaction::Recovered, Eip658Value, Header, Transaction,
     TxEip1559, Typed2718, EMPTY_OMMER_ROOT_HASH,
 };
-#[cfg(feature = "aa4337")]
-use alloy_eips::eip2718::WithEncoded;
-use alloy_eips::merge::BEACON_NONCE;
+
+use alloy_eips::{eip2718::WithEncoded, merge::BEACON_NONCE};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_primitives::{private::alloy_rlp::Encodable, Address, Bytes, TxHash, TxKind, U256};
 use alloy_rpc_types_engine::PayloadId;
@@ -71,6 +70,8 @@ use revm::{
     DatabaseCommit,
 };
 use std::{sync::Arc, time::Instant};
+#[cfg(feature = "aa4337")]
+use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
@@ -388,44 +389,79 @@ where
         // Request bundle menu from bundler when aa4337 feature is enabled
         #[cfg(feature = "aa4337")]
         {
-            let gas_limit = block_env_attributes.gas_limit;
-            debug!(target: "payload_builder", "Requesting ERC-4337 bundle menu with gas limit: {}", gas_limit);
+            // Only attempt to include bundles if transactions from external sources (pool/bundler) are allowed
+            if !config.attributes.no_tx_pool {
+                // Attempt to get the current Tokio runtime handle
+                match Handle::try_current() {
+                    Ok(handle) => {
+                        // --- Gas Limit Calculation (PoC Limitation) ---
+                        // WARNING: This uses the total block gas limit. It does NOT account for gas
+                        // potentially consumed by transactions already present in `config.attributes.transactions`
+                        // before this point. A more accurate approach would calculate residual gas *after*
+                        // executing initial attribute transactions (like in the alternative OpBuilder::execute stage).
+                        let gas_limit_for_bundler = block_env_attributes.gas_limit;
+                        warn!(target: "payload_builder", id=%config.payload_id(), "Using total block gas limit ({}) for bundler PoC, not residual gas.", gas_limit_for_bundler);
 
-            // Request a bundle menu from the bundler (uses block_on to handle async)
-            let menu = tokio::runtime::Handle::current().block_on(
-                self.bundler_integration
-                    .request_bundle_menu(gas_limit, None),
-            );
+                        debug!(target: "payload_builder", id=%config.payload_id(), "Requesting ERC-4337 bundle menu with gas limit: {}", gas_limit_for_bundler);
 
-            debug!(target: "payload_builder", "Received ERC-4337 bundle menu with {} options", menu.len());
+                        // Request a bundle menu (synchronously for PoC using block_on)
+                        // Note: Real bundler interaction should be async and handled appropriately.
+                        let menu = handle.block_on(
+                            self.bundler_integration
+                                .request_bundle_menu(gas_limit_for_bundler, None), // TODO: Consider fee_target
+                        );
 
-            // Find the best bundle
-            if let Some(best_bundle) = tokio::runtime::Handle::current()
-                .block_on(self.bundler_integration.find_best_bundle(gas_limit))
-            {
-                debug!(
-                    target: "payload_builder",
-                    "Selected ERC-4337 bundle: gas_used={}, profit_hint={}",
-                    best_bundle.gas_used, best_bundle.profit_hint
-                );
+                        debug!(target: "payload_builder", id=%config.payload_id(), "Received ERC-4337 bundle menu with {} options", menu.len());
 
-                let mut encoded_bytes_vec = Vec::new();
-                // Use the Encodable trait's encode method
-                best_bundle.tx.encode(&mut encoded_bytes_vec);
-                let encoded_bytes = Bytes::from(encoded_bytes_vec);
-                let tx_with_encoded: WithEncoded<op_alloy_consensus::OpTxEnvelope> =
-                    WithEncoded::new(encoded_bytes, best_bundle.tx);
+                        // Find the best bundle from the menu (synchronously for PoC using block_on)
+                        if let Some(best_bundle) = handle.block_on(
+                            self.bundler_integration
+                                .find_best_bundle(gas_limit_for_bundler),
+                        ) {
+                            let bundle_gas = best_bundle.gas_used;
+                            let bundle_profit = best_bundle.profit_hint;
+                            let bundle_tx_hash = best_bundle.tx.hash(); // Calculate hash for logging
 
-                // Add the bundle transaction to the payload attributes' transactions
-                let mut transactions = config.attributes.transactions.clone();
-                transactions.push(tx_with_encoded);
+                            debug!(
+                                target: "payload_builder",
+                                id=%config.payload_id(),
+                                bundle_tx_hash=format!("{bundle_tx_hash:#x}"),
+                                bundle_gas,
+                                bundle_profit,
+                                "Selected ERC-4337 bundle",
+                            );
 
-                // Replace the transactions in the config
-                config.attributes.transactions = transactions;
+                            // RLP encode the transaction envelope for storage in attributes
+                            // This clones the TxEnvelope internally before encoding.
+                            let mut encoded_bytes_vec = Vec::new();
+                            best_bundle.tx.encode(&mut encoded_bytes_vec); // Use encode from the trait
+                            let encoded_bundle_tx = Bytes::from(encoded_bytes_vec);
 
-                debug!(target: "payload_builder", "Added ERC-4337 bundle to transactions");
+                            // Wrap the bundle tx and its encoded form using WithEncoded
+                            let bundle_tx_with_encoded: WithEncoded<
+                                op_alloy_consensus::OpTxEnvelope,
+                            > = WithEncoded::new(encoded_bundle_tx, best_bundle.tx); // Pass the original tx object too
+
+                            // Clone the existing transactions list
+                            let mut transactions = config.attributes.transactions.clone();
+                            // Add the selected bundle
+                            transactions.push(bundle_tx_with_encoded);
+
+                            // Replace the original transactions list in the mutable config
+                            config.attributes.transactions = transactions;
+
+                            debug!(target: "payload_builder", id=%config.payload_id(), "Added ERC-4337 bundle to transactions list (now {} total)", config.attributes.transactions.len());
+                        } else {
+                            debug!(target: "payload_builder", id=%config.payload_id(), "No suitable ERC-4337 bundle found for gas limit {}", gas_limit_for_bundler);
+                        }
+                    }
+                    Err(e) => {
+                        // Log if we can't get the Tokio handle (e.g., called outside runtime)
+                        warn!(target: "payload_builder", id=%config.payload_id(), error = %e, "Failed to get Tokio handle, skipping bundler interaction.");
+                    }
+                }
             } else {
-                debug!(target: "payload_builder", "No suitable ERC-4337 bundle found");
+                debug!(target: "payload_builder", id=%config.payload_id(), "Skipping bundler interaction because no_tx_pool is true.");
             }
         }
 
