@@ -74,7 +74,7 @@ impl BundlerIntegration {
             let mut lock = self.current_menu.write().await;
             *lock = menu.clone();
 
-            info!(
+            debug!(
                 "Received bundle menu with {} options, gas_usages: {:?}, profits: {:?}",
                 menu.len(),
                 menu.iter().map(|b| b.gas_used).collect::<Vec<_>>(),
