@@ -454,49 +454,33 @@ where
             }
         };
 
-        if let Some(bundle) = handle.block_on(self.get_best_bundle(block_gas_limit)) {
-            // Add the bundle transaction to the config
-            self.add_bundle_to_config(config, bundle);
-        }
-    }
+        let best_bundle = match handle.block_on(
+            self.bundler_integration
+                .get_best_bundle(block_gas_limit, None),
+        ) {
+            Some(bundle) => bundle,
+            None => return,
+        };
 
-    #[cfg(feature = "aa4337")]
-    async fn get_best_bundle(&self, block_gas_limit: u64) -> Option<BundleMeta> {
-        // Request new menu and find the best option
-        self.bundler_integration
-            .request_bundle_menu(block_gas_limit, None)
-            .await;
-        self.bundler_integration
-            .find_best_bundle(block_gas_limit)
-            .await
-    }
-
-    #[cfg(feature = "aa4337")]
-    fn add_bundle_to_config(
-        &self,
-        config: &mut PayloadConfig<OpPayloadBuilderAttributes<OpTransactionSigned>>,
-        bundle: BundleMeta,
-    ) {
-        let bundle_tx_hash = bundle.tx.hash();
-
+        // Log bundle details
+        let bundle_tx_hash = best_bundle.tx.hash();
         debug!(
             target: "payload_builder",
             id=%config.payload_id(),
-            hash=?bundle_tx_hash,
-            gas=bundle.gas_used,
-            profit=bundle.profit_hint,
-            "Adding ERC-4337 bundle to payload"
+            bundle_tx_hash=format!("{bundle_tx_hash:#x}"),
+            bundle_gas=best_bundle.gas_used,
+            bundle_profit=best_bundle.profit_hint,
+            "Selected ERC-4337 bundle",
         );
 
-        // Encode the transaction
+        // Encode the transaction and add to config
         let mut encoded_bytes = Vec::new();
-        bundle.tx.encode(&mut encoded_bytes);
+        best_bundle.tx.encode(&mut encoded_bytes);
 
-        // Add to config
         config
             .attributes
             .transactions
-            .push(WithEncoded::new(Bytes::from(encoded_bytes), bundle.tx));
+            .push(WithEncoded::new(Bytes::from(encoded_bytes), best_bundle.tx));
     }
 }
 

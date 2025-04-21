@@ -51,29 +51,18 @@ impl BundlerIntegration {
         }
     }
 
-    /// Get the current bundle menu
-    pub async fn get_bundle_menu(&self) -> Vec<BundleMeta> {
-        self.current_menu.read().await.clone()
-    }
-
-    /// Request a new bundle menu from the bundler
-    pub async fn request_bundle_menu(
-        &self,
-        gas_limit: u64,
-        fee_target: Option<i128>,
-    ) -> Vec<BundleMeta> {
-        // Request bundle options from the bundler using the constant
+    /// Request a new bundle menu from the bundler and update internal state
+    pub async fn update_bundle_menu(&self, gas_limit: u64, fee_target: Option<i128>) {
+        // Request bundle options from the bundler
         let menu = self
             .bundler
             .propose_bundles(gas_limit, DEFAULT_MENU_SIZE, fee_target)
             .await;
 
+        // Log the results
         if menu.is_empty() {
             debug!("Bundler returned empty menu");
         } else {
-            let mut lock = self.current_menu.write().await;
-            *lock = menu.clone();
-
             debug!(
                 "Received bundle menu with {} options, gas_usages: {:?}, profits: {:?}",
                 menu.len(),
@@ -82,21 +71,55 @@ impl BundlerIntegration {
             );
         }
 
-        menu
+        // Update the current menu
+        let mut lock = self.current_menu.write().await;
+        *lock = menu;
     }
 
-    /// Find the best bundle option for the given gas limit
+    /// Get the current bundle menu
+    pub async fn get_bundle_menu(&self) -> Vec<BundleMeta> {
+        self.current_menu.read().await.clone()
+    }
+
+    /// Find the best bundle option for the given gas limit from current menu
     pub async fn find_best_bundle(&self, gas_limit: u64) -> Option<BundleMeta> {
         let menu = self.current_menu.read().await;
+
         if menu.is_empty() {
+            debug!("Cannot find best bundle: menu is empty");
             return None;
         }
 
         // Find the bundle with the highest profit that fits in the gas limit
-        menu.iter()
+        let best_bundle = menu
+            .iter()
             .filter(|b| b.gas_used <= gas_limit)
             .max_by_key(|b| b.profit_hint)
-            .cloned()
+            .cloned();
+
+        if let Some(ref bundle) = best_bundle {
+            debug!(
+                "Selected best bundle: gas={}, profit={}",
+                bundle.gas_used, bundle.profit_hint
+            );
+        } else {
+            debug!("No suitable bundle found within gas limit {}", gas_limit);
+        }
+
+        best_bundle
+    }
+
+    /// Convenience method: Update menu and find best bundle in one operation
+    pub async fn get_best_bundle(
+        &self,
+        gas_limit: u64,
+        fee_target: Option<i128>,
+    ) -> Option<BundleMeta> {
+        // Update menu first
+        self.update_bundle_menu(gas_limit, fee_target).await;
+
+        // Then find best bundle
+        self.find_best_bundle(gas_limit).await
     }
 }
 
@@ -110,9 +133,10 @@ mod tests {
         let integration = BundlerIntegration::default();
 
         // Test with sufficient gas
-        let menu = integration
-            .request_bundle_menu(5_000_000, None::<i128>)
+        integration
+            .update_bundle_menu(5_000_000, None::<i128>)
             .await;
+        let menu = integration.get_bundle_menu().await;
         assert_eq!(menu.len(), 3);
 
         // Get the best bundle
@@ -122,14 +146,8 @@ mod tests {
         assert_eq!(best.gas_used, 3_000_000);
         assert_eq!(best.profit_hint, 800_000_000_000_000);
 
-        // Test with limited gas
-        let menu = integration
-            .request_bundle_menu(2_000_000, None::<i128>)
-            .await;
-        assert_eq!(menu.len(), 2);
-
-        // Get the best bundle with limited gas
-        let best = integration.find_best_bundle(2_000_000).await;
+        // Test with limited gas (using the convenience method)
+        let best = integration.get_best_bundle(2_000_000, None::<i128>).await;
         assert!(best.is_some());
         let best = best.unwrap();
         assert_eq!(best.gas_used, 1_000_000);
