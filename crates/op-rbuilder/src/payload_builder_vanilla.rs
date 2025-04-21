@@ -453,25 +453,17 @@ where
             }
         };
 
-        // Warning about using total block gas limit
-        warn!(target: "payload_builder", id=%config.payload_id(), "Using total block gas limit ({}) for bundler PoC, not residual gas.", block_gas_limit);
-
-        // Request bundle menu
-        debug!(target: "payload_builder", id=%config.payload_id(), "Requesting ERC-4337 bundle menu with gas limit: {}", block_gas_limit);
-        handle.block_on(
+        let best_bundle = match handle.block_on(async {
+            // First request menu, then find best option
             self.bundler_integration
-                .request_bundle_menu(block_gas_limit, None),
-        );
-
-        // Find best bundle
-        let best_bundle = match handle
-            .block_on(self.bundler_integration.find_best_bundle(block_gas_limit))
-        {
+                .request_bundle_menu(block_gas_limit, None)
+                .await;
+            self.bundler_integration
+                .find_best_bundle(block_gas_limit)
+                .await
+        }) {
             Some(bundle) => bundle,
-            None => {
-                debug!(target: "payload_builder", id=%config.payload_id(), "No suitable ERC-4337 bundle found for gas limit {}", block_gas_limit);
-                return;
-            }
+            None => return,
         };
 
         // Log bundle details
@@ -493,8 +485,6 @@ where
             Bytes::from(encoded_bytes_vec),
             best_bundle.tx,
         ));
-
-        debug!(target: "payload_builder", id=%config.payload_id(), "Added ERC-4337 bundle to transactions list (now {} total)", config.attributes.transactions.len());
     }
 }
 
