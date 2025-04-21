@@ -1,7 +1,7 @@
 use crate::bundler::{BundleMeta, Bundler, MockBundler};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::debug;
 
 // Use a constant for menu size
 const DEFAULT_MENU_SIZE: usize = 3;

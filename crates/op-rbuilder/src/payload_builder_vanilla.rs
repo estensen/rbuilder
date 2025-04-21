@@ -8,6 +8,8 @@ use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, transaction::Recovered, Eip658Value, Header, Transaction,
     TxEip1559, Typed2718, EMPTY_OMMER_ROOT_HASH,
 };
+#[cfg(feature = "aa4337")]
+use alloy_eips::eip2718::WithEncoded;
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_primitives::{private::alloy_rlp::Encodable, Address, Bytes, TxHash, TxKind, U256};
@@ -355,7 +357,7 @@ where
     {
         let BuildArguments {
             mut cached_reads,
-            config,
+            mut config,
             cancel,
         } = args;
 
@@ -383,6 +385,50 @@ where
             },
         };
 
+        // Request bundle menu from bundler when aa4337 feature is enabled
+        #[cfg(feature = "aa4337")]
+        {
+            let gas_limit = block_env_attributes.gas_limit;
+            debug!(target: "payload_builder", "Requesting ERC-4337 bundle menu with gas limit: {}", gas_limit);
+
+            // Request a bundle menu from the bundler (uses block_on to handle async)
+            let menu = tokio::runtime::Handle::current().block_on(
+                self.bundler_integration
+                    .request_bundle_menu(gas_limit, None),
+            );
+
+            debug!(target: "payload_builder", "Received ERC-4337 bundle menu with {} options", menu.len());
+
+            // Find the best bundle
+            if let Some(best_bundle) = tokio::runtime::Handle::current()
+                .block_on(self.bundler_integration.find_best_bundle(gas_limit))
+            {
+                debug!(
+                    target: "payload_builder",
+                    "Selected ERC-4337 bundle: gas_used={}, profit_hint={}",
+                    best_bundle.gas_used, best_bundle.profit_hint
+                );
+
+                let mut encoded_bytes_vec = Vec::new();
+                // Use the Encodable trait's encode method
+                best_bundle.tx.encode(&mut encoded_bytes_vec);
+                let encoded_bytes = Bytes::from(encoded_bytes_vec);
+                let tx_with_encoded: WithEncoded<op_alloy_consensus::OpTxEnvelope> =
+                    WithEncoded::new(encoded_bytes, best_bundle.tx);
+
+                // Add the bundle transaction to the payload attributes' transactions
+                let mut transactions = config.attributes.transactions.clone();
+                transactions.push(tx_with_encoded);
+
+                // Replace the transactions in the config
+                config.attributes.transactions = transactions;
+
+                debug!(target: "payload_builder", "Added ERC-4337 bundle to transactions");
+            } else {
+                debug!(target: "payload_builder", "No suitable ERC-4337 bundle found");
+            }
+        }
+
         let evm_env = self
             .evm_config
             .next_evm_env(&config.parent_header, &block_env_attributes)
@@ -398,6 +444,8 @@ where
             cancel,
             builder_signer: self.builder_signer,
             metrics: Default::default(),
+            #[cfg(feature = "aa4337")]
+            bundler_integration: Some(self.bundler_integration.clone()),
         };
 
         let builder = OpBuilder::new(best, remove_reverted);
@@ -787,6 +835,9 @@ pub struct OpPayloadBuilderCtx<ChainSpec, N: NodePrimitives> {
     pub builder_signer: Option<Signer>,
     /// The metrics for the builder
     pub metrics: OpRBuilderMetrics,
+    /// The bundler integration for ERC-4337
+    #[cfg(feature = "aa4337")]
+    pub bundler_integration: Option<BundlerIntegration>,
 }
 
 impl<ChainSpec, N> OpPayloadBuilderCtx<ChainSpec, N>
