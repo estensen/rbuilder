@@ -8,6 +8,7 @@ use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, transaction::Recovered, Eip658Value, Header, Transaction,
     TxEip1559, Typed2718, EMPTY_OMMER_ROOT_HASH,
 };
+use op_rbuilder::bundler::BundleMeta;
 
 use alloy_eips::{eip2718::WithEncoded, merge::BEACON_NONCE};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
@@ -453,38 +454,49 @@ where
             }
         };
 
-        let best_bundle = match handle.block_on(async {
-            // First request menu, then find best option
-            self.bundler_integration
-                .request_bundle_menu(block_gas_limit, None)
-                .await;
-            self.bundler_integration
-                .find_best_bundle(block_gas_limit)
-                .await
-        }) {
-            Some(bundle) => bundle,
-            None => return,
-        };
+        if let Some(bundle) = handle.block_on(self.get_best_bundle(block_gas_limit)) {
+            // Add the bundle transaction to the config
+            self.add_bundle_to_config(config, bundle);
+        }
+    }
 
-        // Log bundle details
-        let bundle_tx_hash = best_bundle.tx.hash();
+    #[cfg(feature = "aa4337")]
+    async fn get_best_bundle(&self, block_gas_limit: u64) -> Option<BundleMeta> {
+        // Request new menu and find the best option
+        self.bundler_integration
+            .request_bundle_menu(block_gas_limit, None)
+            .await;
+        self.bundler_integration
+            .find_best_bundle(block_gas_limit)
+            .await
+    }
+
+    #[cfg(feature = "aa4337")]
+    fn add_bundle_to_config(
+        &self,
+        config: &mut PayloadConfig<OpPayloadBuilderAttributes<OpTransactionSigned>>,
+        bundle: BundleMeta,
+    ) {
+        let bundle_tx_hash = bundle.tx.hash();
+
         debug!(
             target: "payload_builder",
             id=%config.payload_id(),
-            bundle_tx_hash=format!("{bundle_tx_hash:#x}"),
-            bundle_gas=best_bundle.gas_used,
-            bundle_profit=best_bundle.profit_hint,
-            "Selected ERC-4337 bundle",
+            hash=?bundle_tx_hash,
+            gas=bundle.gas_used,
+            profit=bundle.profit_hint,
+            "Adding ERC-4337 bundle to payload"
         );
 
-        // Encode the transaction and add to config
-        let mut encoded_bytes_vec = Vec::new();
-        best_bundle.tx.encode(&mut encoded_bytes_vec);
+        // Encode the transaction
+        let mut encoded_bytes = Vec::new();
+        bundle.tx.encode(&mut encoded_bytes);
 
-        config.attributes.transactions.push(WithEncoded::new(
-            Bytes::from(encoded_bytes_vec),
-            best_bundle.tx,
-        ));
+        // Add to config
+        config
+            .attributes
+            .transactions
+            .push(WithEncoded::new(Bytes::from(encoded_bytes), bundle.tx));
     }
 }
 
