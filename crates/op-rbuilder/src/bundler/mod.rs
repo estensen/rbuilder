@@ -4,15 +4,16 @@
 //! a menu of transaction bundles to the payload builder. The bundler is enabled
 //! via the `aa4337` feature flag.
 
+use alloy_primitives::Signature;
 use futures::future::BoxFuture;
-use op_alloy_consensus::OpTypedTransaction;
+use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use tracing::info;
 
 /// Metadata for a bundle transaction
 #[derive(Debug, Clone)]
 pub struct BundleMeta {
     /// The wrapped handleOps() transaction
-    pub tx: OpTypedTransaction,
+    pub tx: OpTxEnvelope,
     /// Simulated gas used by the bundle
     pub gas_used: u64,
     /// Profit hint in wei (can be negative)
@@ -86,8 +87,10 @@ impl Bundler for MockBundler {
                     // Create a mock transaction (would be a real handleOps() in production)
                     let tx = OpTypedTransaction::Eip1559(Default::default());
 
+                    let enveloped: OpTxEnvelope = (tx, Signature::test_signature()).into();
+
                     bundles.push(BundleMeta {
-                        tx,
+                        tx: enveloped,
                         gas_used: *gas,
                         profit_hint: *profit,
                     });

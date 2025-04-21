@@ -14,6 +14,7 @@ use alloy_primitives::{private::alloy_rlp::Encodable, Address, Bytes, TxHash, Tx
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawals;
 use op_alloy_consensus::{OpDepositReceipt, OpTypedTransaction};
+use op_rbuilder::payload_builder_bundler::BundlerIntegration;
 use op_revm::OpSpecId;
 use reth::{
     builder::{
@@ -81,6 +82,8 @@ pub struct CustomOpPayloadBuilder {
     chain_block_time: u64,
     #[cfg(feature = "flashblocks")]
     flashblock_block_time: u64,
+    #[cfg(feature = "aa4337")]
+    bundler_integration: Option<BundlerIntegration>,
 }
 
 impl CustomOpPayloadBuilder {
@@ -96,6 +99,8 @@ impl CustomOpPayloadBuilder {
             flashblocks_ws_url,
             chain_block_time,
             flashblock_block_time,
+            #[cfg(feature = "aa4337")]
+            bundler_integration: Some(BundlerIntegration::default()),
         }
     }
 
@@ -106,7 +111,11 @@ impl CustomOpPayloadBuilder {
         _chain_block_time: u64,
         _flashblock_block_time: u64,
     ) -> Self {
-        Self { builder_signer }
+        Self {
+            builder_signer,
+            #[cfg(feature = "aa4337")]
+            bundler_integration: Some(BundlerIntegration::default()),
+        }
     }
 }
 
@@ -229,6 +238,9 @@ pub struct OpPayloadBuilderVanilla<Pool, Client, Txs = ()> {
     pub best_transactions: Txs,
     /// The metrics for the builder
     pub metrics: OpRBuilderMetrics,
+    /// The bundler integration for ERC-4337
+    #[cfg(feature = "aa4337")]
+    pub bundler_integration: BundlerIntegration,
 }
 
 impl<Pool, Client> OpPayloadBuilderVanilla<Pool, Client> {
@@ -257,6 +269,8 @@ impl<Pool, Client> OpPayloadBuilderVanilla<Pool, Client> {
             best_transactions: (),
             metrics: Default::default(),
             builder_signer,
+            #[cfg(feature = "aa4337")]
+            bundler_integration: BundlerIntegration::default(),
         }
     }
 }
