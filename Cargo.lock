@@ -7470,6 +7470,7 @@ dependencies = [
  "clap_builder",
  "derive_more 2.0.1",
  "eyre",
+ "futures",
  "futures-util",
  "jsonrpsee 0.24.9",
  "metrics",
