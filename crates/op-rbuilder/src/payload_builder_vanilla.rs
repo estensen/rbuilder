@@ -388,82 +388,7 @@ where
 
         // Request bundle menu from bundler when aa4337 feature is enabled
         #[cfg(feature = "aa4337")]
-        {
-            // Only attempt to include bundles if transactions from external sources (pool/bundler) are allowed
-            if !config.attributes.no_tx_pool {
-                // Attempt to get the current Tokio runtime handle
-                match Handle::try_current() {
-                    Ok(handle) => {
-                        // --- Gas Limit Calculation (PoC Limitation) ---
-                        // WARNING: This uses the total block gas limit. It does NOT account for gas
-                        // potentially consumed by transactions already present in `config.attributes.transactions`
-                        // before this point. A more accurate approach would calculate residual gas *after*
-                        // executing initial attribute transactions (like in the alternative OpBuilder::execute stage).
-                        let gas_limit_for_bundler = block_env_attributes.gas_limit;
-                        warn!(target: "payload_builder", id=%config.payload_id(), "Using total block gas limit ({}) for bundler PoC, not residual gas.", gas_limit_for_bundler);
-
-                        debug!(target: "payload_builder", id=%config.payload_id(), "Requesting ERC-4337 bundle menu with gas limit: {}", gas_limit_for_bundler);
-
-                        // Request a bundle menu (synchronously for PoC using block_on)
-                        // Note: Real bundler interaction should be async and handled appropriately.
-                        let menu = handle.block_on(
-                            self.bundler_integration
-                                .request_bundle_menu(gas_limit_for_bundler, None), // TODO: Consider fee_target
-                        );
-
-                        debug!(target: "payload_builder", id=%config.payload_id(), "Received ERC-4337 bundle menu with {} options", menu.len());
-
-                        // Find the best bundle from the menu (synchronously for PoC using block_on)
-                        if let Some(best_bundle) = handle.block_on(
-                            self.bundler_integration
-                                .find_best_bundle(gas_limit_for_bundler),
-                        ) {
-                            let bundle_gas = best_bundle.gas_used;
-                            let bundle_profit = best_bundle.profit_hint;
-                            let bundle_tx_hash = best_bundle.tx.hash(); // Calculate hash for logging
-
-                            debug!(
-                                target: "payload_builder",
-                                id=%config.payload_id(),
-                                bundle_tx_hash=format!("{bundle_tx_hash:#x}"),
-                                bundle_gas,
-                                bundle_profit,
-                                "Selected ERC-4337 bundle",
-                            );
-
-                            // RLP encode the transaction envelope for storage in attributes
-                            // This clones the TxEnvelope internally before encoding.
-                            let mut encoded_bytes_vec = Vec::new();
-                            best_bundle.tx.encode(&mut encoded_bytes_vec); // Use encode from the trait
-                            let encoded_bundle_tx = Bytes::from(encoded_bytes_vec);
-
-                            // Wrap the bundle tx and its encoded form using WithEncoded
-                            let bundle_tx_with_encoded: WithEncoded<
-                                op_alloy_consensus::OpTxEnvelope,
-                            > = WithEncoded::new(encoded_bundle_tx, best_bundle.tx); // Pass the original tx object too
-
-                            // Clone the existing transactions list
-                            let mut transactions = config.attributes.transactions.clone();
-                            // Add the selected bundle
-                            transactions.push(bundle_tx_with_encoded);
-
-                            // Replace the original transactions list in the mutable config
-                            config.attributes.transactions = transactions;
-
-                            debug!(target: "payload_builder", id=%config.payload_id(), "Added ERC-4337 bundle to transactions list (now {} total)", config.attributes.transactions.len());
-                        } else {
-                            debug!(target: "payload_builder", id=%config.payload_id(), "No suitable ERC-4337 bundle found for gas limit {}", gas_limit_for_bundler);
-                        }
-                    }
-                    Err(e) => {
-                        // Log if we can't get the Tokio handle (e.g., called outside runtime)
-                        warn!(target: "payload_builder", id=%config.payload_id(), error = %e, "Failed to get Tokio handle, skipping bundler interaction.");
-                    }
-                }
-            } else {
-                debug!(target: "payload_builder", id=%config.payload_id(), "Skipping bundler interaction because no_tx_pool is true.");
-            }
-        }
+        self.maybe_add_erc4337_bundle(&mut config, block_env_attributes.gas_limit);
 
         let evm_env = self
             .evm_config
@@ -504,6 +429,87 @@ where
             builder.build(db, ctx)
         }
         .map(|out| out.with_cached_reads(cached_reads))
+    }
+
+    #[cfg(feature = "aa4337")]
+    fn maybe_add_erc4337_bundle(
+        &self,
+        config: &mut PayloadConfig<OpPayloadBuilderAttributes<OpTransactionSigned>>,
+        block_gas_limit: u64,
+    ) {
+        // Only attempt to include bundles if transactions from external sources (pool/bundler) are allowed
+        if !config.attributes.no_tx_pool {
+            // Attempt to get the current Tokio runtime handle
+            match Handle::try_current() {
+                Ok(handle) => {
+                    // --- Gas Limit Calculation (PoC Limitation) ---
+                    // WARNING: This uses the total block gas limit. It does NOT account for gas
+                    // potentially consumed by transactions already present in `config.attributes.transactions`
+                    // before this point. A more accurate approach would calculate residual gas *after*
+                    // executing initial attribute transactions (like in the alternative OpBuilder::execute stage).
+                    let gas_limit_for_bundler = block_gas_limit;
+                    warn!(target: "payload_builder", id=%config.payload_id(), "Using total block gas limit ({}) for bundler PoC, not residual gas.", gas_limit_for_bundler);
+
+                    debug!(target: "payload_builder", id=%config.payload_id(), "Requesting ERC-4337 bundle menu with gas limit: {}", gas_limit_for_bundler);
+
+                    // Request a bundle menu (synchronously for PoC using block_on)
+                    // Note: Real bundler interaction should be async and handled appropriately.
+                    let menu = handle.block_on(
+                        self.bundler_integration
+                            .request_bundle_menu(gas_limit_for_bundler, None), // TODO: Consider fee_target
+                    );
+
+                    debug!(target: "payload_builder", id=%config.payload_id(), "Received ERC-4337 bundle menu with {} options", menu.len());
+
+                    // Find the best bundle from the menu (synchronously for PoC using block_on)
+                    if let Some(best_bundle) = handle.block_on(
+                        self.bundler_integration
+                            .find_best_bundle(gas_limit_for_bundler),
+                    ) {
+                        let bundle_gas = best_bundle.gas_used;
+                        let bundle_profit = best_bundle.profit_hint;
+                        let bundle_tx_hash = best_bundle.tx.hash(); // Calculate hash for logging
+
+                        debug!(
+                            target: "payload_builder",
+                            id=%config.payload_id(),
+                            bundle_tx_hash=format!("{bundle_tx_hash:#x}"),
+                            bundle_gas,
+                            bundle_profit,
+                            "Selected ERC-4337 bundle",
+                        );
+
+                        // RLP encode the transaction envelope for storage in attributes
+                        // This clones the TxEnvelope internally before encoding.
+                        let mut encoded_bytes_vec = Vec::new();
+                        best_bundle.tx.encode(&mut encoded_bytes_vec); // Use encode from the trait
+                        let encoded_bundle_tx = Bytes::from(encoded_bytes_vec);
+
+                        // Wrap the bundle tx and its encoded form using WithEncoded
+                        let bundle_tx_with_encoded: WithEncoded<op_alloy_consensus::OpTxEnvelope> =
+                            WithEncoded::new(encoded_bundle_tx, best_bundle.tx); // Pass the original tx object too
+
+                        // Clone the existing transactions list
+                        let mut transactions = config.attributes.transactions.clone();
+                        // Add the selected bundle
+                        transactions.push(bundle_tx_with_encoded);
+
+                        // Replace the original transactions list in the mutable config
+                        config.attributes.transactions = transactions;
+
+                        debug!(target: "payload_builder", id=%config.payload_id(), "Added ERC-4337 bundle to transactions list (now {} total)", config.attributes.transactions.len());
+                    } else {
+                        debug!(target: "payload_builder", id=%config.payload_id(), "No suitable ERC-4337 bundle found for gas limit {}", gas_limit_for_bundler);
+                    }
+                }
+                Err(e) => {
+                    // Log if we can't get the Tokio handle (e.g., called outside runtime)
+                    warn!(target: "payload_builder", id=%config.payload_id(), error = %e, "Failed to get Tokio handle, skipping bundler interaction.");
+                }
+            }
+        } else {
+            debug!(target: "payload_builder", id=%config.payload_id(), "Skipping bundler interaction because no_tx_pool is true.");
+        }
     }
 }
 
