@@ -58,7 +58,7 @@ use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, Transac
 use revm::{
     context::{result::ResultAndState, Block as _},
     database::{states::bundle_state::BundleRetention, BundleState, State},
-    primitives as revm_primitives, DatabaseCommit,
+    DatabaseCommit,
 };
 use rollup_boost::primitives::{
     ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
@@ -74,7 +74,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Flashblocks specific payload building errors.
 #[derive(Debug, thiserror::Error)]
@@ -380,8 +380,8 @@ where
             config,
             evm_env,
             block_env_attributes,
-            cancel: args.cancel.clone(),
-            metrics: self.metrics.clone(),
+            cancel,
+            metrics: Default::default(),
         };
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
@@ -646,25 +646,7 @@ where
         .block_logs_bloom(block_number)
         .expect("Number is in range");
 
-    // Recalculate receipts root and logs bloom *after* potential bundle inclusion
-    // Note: This uses the *final* info.receipts which might not include bundle receipts yet.
-    // Need to adjust how bundle receipts are handled if they should be included in the roots.
-    // For now, bundle txs are added to info.executed_transactions, affecting transactions_root.
-    // TODO: Properly integrate bundle receipts into OpReceipt/ExecutionOutcome for root calculation.
-    let receipts_root = execution_outcome
-        .generic_receipts_root_slow(block_number, |receipts| {
-            calculate_receipt_root_no_memo_optimism(
-                receipts, // These are receipts from *before* the bundle was added
-                &ctx.chain_spec,
-                ctx.attributes().timestamp(),
-            )
-        })
-        .expect("Number is in range");
-    let logs_bloom = execution_outcome // This bloom is also from *before* the bundle
-        .block_logs_bloom(block_number)
-        .expect("Number is in range");
-
-    // calculate the state root _after_ potential bundle inclusion
+    // calculate the state root
     let state_root_start_time = Instant::now();
     let state_provider = state.database.as_ref();
     let hashed_state = state_provider.hashed_post_state(execution_outcome.state());
