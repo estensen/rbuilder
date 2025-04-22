@@ -1,4 +1,4 @@
-use super::{types::BundleMeta, Bundler};
+use super::{integration::Bundler, types::BundleMeta};
 use alloy_primitives::Signature;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use tracing::info;

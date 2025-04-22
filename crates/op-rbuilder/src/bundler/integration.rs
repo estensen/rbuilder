@@ -1,6 +1,23 @@
-use super::{mock::MockBundler, types::BundleMeta, Bundler};
+use super::{mock::MockBundler, types::BundleMeta};
 use std::sync::{Arc, RwLock};
 use tracing::debug;
+
+/// Bundler trait for proposing bundles of transactions
+pub trait Bundler: Send + Sync {
+    /// Propose a menu of bundles based on the given constraints
+    ///
+    /// # Arguments
+    /// * `gas_limit` - Residual gas available for bundles
+    /// * `k` - Maximum number of bundle options to return
+    /// * `fee_target` - Optional minimum fee target (only return bundles with profit >= fee_target)
+    /// HACK: should have error handling
+    fn propose_bundles(
+        &self,
+        gas_limit: u64,
+        k: usize,
+        fee_target: Option<i128>,
+    ) -> Vec<BundleMeta>;
+}
 
 /// BundlerIntegration provides integration with ERC-4337 bundler
 pub struct BundlerIntegration {
