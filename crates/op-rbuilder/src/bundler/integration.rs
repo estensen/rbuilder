@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(best.gas_used, 3_000_000);
         assert_eq!(best.profit_hint, 800_000_000_000_000);
 
-        // Test with limited gas (using the convenience method)
+        // Test with limited gas
         let best = integration.get_best_bundle(2_000_000, None::<i128>);
         assert!(best.is_some());
         let best = best.unwrap();
